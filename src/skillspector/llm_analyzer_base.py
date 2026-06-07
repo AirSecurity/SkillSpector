@@ -61,9 +61,11 @@ class LLMFinding(BaseModel):
     rule_id: str = Field(description="Identifier for the type of finding")
     message: str = Field(description="Short description of the finding")
     severity: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = Field(description="Severity level")
-    start_line: int = Field(ge=1, description="Starting line number")
+    # Local patch: dropped ge=/le= — Anthropic's OpenAI-compat endpoint 400s on
+    # `minimum`/`maximum` in structured-output schemas. Bounds kept in description.
+    start_line: int = Field(description="Starting line number (>= 1)")
     end_line: int | None = Field(default=None, description="Ending line number (optional)")
-    confidence: float = Field(ge=0.0, le=1.0, default=0.5, description="Confidence score")
+    confidence: float = Field(default=0.5, description="Confidence score between 0.0 and 1.0")
     explanation: str = Field(default="", description="Why this is a finding (2-3 sentences)")
     remediation: str = Field(default="", description="Actionable steps to fix the issue")
 

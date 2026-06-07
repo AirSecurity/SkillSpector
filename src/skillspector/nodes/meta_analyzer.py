@@ -63,7 +63,9 @@ class MetaAnalyzerFinding(BaseModel):
         description="The end line number from the finding's Location, if available.",
     )
     is_vulnerability: bool = Field(description="Whether this is a true vulnerability")
-    confidence: float = Field(ge=0.0, le=1.0, description="Confidence score between 0.0 and 1.0")
+    # Local patch: dropped ge=/le= — Anthropic's OpenAI-compat endpoint 400s on
+    # `minimum`/`maximum` in structured-output schemas. Bound kept in description.
+    confidence: float = Field(description="Confidence score between 0.0 and 1.0")
     intent: Literal["malicious", "negligent", "benign"] = Field(
         description="Likely intent behind the finding"
     )
