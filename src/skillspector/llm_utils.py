@@ -31,11 +31,17 @@ from __future__ import annotations
 
 import os
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
 from skillspector.constants import MODEL_CONFIG
 from skillspector.model_info import get_max_input_tokens, get_max_output_tokens
 from skillspector.providers import resolve_provider_credentials
+
+
+def _active_provider_name() -> str:
+    """Active ``SKILLSPECTOR_PROVIDER`` (lowercased). air/space helper."""
+    return os.environ.get("SKILLSPECTOR_PROVIDER", "").strip().lower()
 
 
 def _resolve_llm_credentials() -> tuple[str, str | None]:
@@ -66,6 +72,17 @@ def _resolve_llm_credentials() -> tuple[str, str | None]:
 
 def is_llm_available() -> tuple[bool, str | None]:
     """Return ``(available, error_message)`` describing LLM credential status."""
+    # air/space: claude_cli auth is the CLI's own OAuth — "available" means the
+    # `claude` binary is on PATH (operator has run `claude login`).
+    if _active_provider_name() == "claude_cli":
+        from skillspector.providers.claude_cli import claude_cli_available
+
+        if claude_cli_available():
+            return True, None
+        return False, (
+            "claude_cli provider selected but the `claude` CLI is not on PATH. "
+            "Install Claude Code and run `claude login`."
+        )
     try:
         _resolve_llm_credentials()
     except ValueError as exc:
@@ -78,15 +95,25 @@ def fetch_model_token_limits(model_label: str) -> tuple[int, int]:
     return get_max_input_tokens(model_label), get_max_output_tokens(model_label)
 
 
-def get_chat_model(model: str | None = None) -> ChatOpenAI:
-    """Return a :class:`ChatOpenAI` configured against the resolved endpoint.
+def get_chat_model(model: str | None = None) -> BaseChatModel:
+    """Return a chat model configured against the active provider.
+
+    OpenAI-compatible providers (openai / anthropic / nv_build) return a
+    :class:`ChatOpenAI`. The air/space ``claude_cli`` provider returns a
+    CLI-backed chat model (OAuth, no api key/endpoint).
 
     Raises:
-        ValueError: when no API key is configured (see ``is_llm_available``).
+        ValueError: when no credentials/config are available (see ``is_llm_available``).
     """
-    resolved_key, resolved_base = _resolve_llm_credentials()
     model = model or MODEL_CONFIG["default"]
 
+    # air/space: claude_cli wraps the `claude` CLI (OAuth) — no api key, no HTTP.
+    if _active_provider_name() == "claude_cli":
+        from skillspector.providers.claude_cli import build_claude_cli_chat_model
+
+        return build_claude_cli_chat_model(model)
+
+    resolved_key, resolved_base = _resolve_llm_credentials()
     return ChatOpenAI(
         model=model,
         base_url=resolved_base,
