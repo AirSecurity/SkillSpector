@@ -49,10 +49,17 @@ def claude_cli_available() -> bool:
 
 
 def _cli_model_alias(model: str | None) -> str | None:
-    """Map a marketplace model label to a CLI-accepted alias (sonnet/opus/haiku)."""
+    """Resolve a model label to a value the ``claude`` CLI accepts.
+
+    Full model ids (``claude-opus-4-8``, ``claude-sonnet-4-6``, …) are accepted
+    by the CLI verbatim, so pass them through — an explicit version pins exactly
+    that model. Bare family words map to the CLI's short aliases.
+    """
     if not model:
         return None
     low = model.lower()
+    if low.startswith("claude-"):
+        return model
     if "opus" in low:
         return "opus"
     if "haiku" in low:
