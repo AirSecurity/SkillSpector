@@ -49,6 +49,11 @@ def _select_active_provider() -> ModelMetadataProvider:
         from .anthropic import AnthropicProvider
 
         return AnthropicProvider()
+    if name == "claude_cli":
+        # air/space addition: Claude via the Claude Code CLI (OAuth `claude login`).
+        from .claude_cli import ClaudeCliProvider
+
+        return ClaudeCliProvider()
     if name == "nv_build":
         return NvBuildProvider()
     if name in ("nv_inference", ""):
@@ -63,7 +68,7 @@ def _select_active_provider() -> ModelMetadataProvider:
 
     raise ValueError(
         f"Unknown SKILLSPECTOR_PROVIDER: {name!r}. "
-        "Expected one of: openai, anthropic, nv_build (or unset)."
+        "Expected one of: openai, anthropic, claude_cli, nv_build (or unset)."
     )
 
 
