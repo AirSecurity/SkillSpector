@@ -23,6 +23,7 @@ from typing import Annotated
 from typing_extensions import TypedDict
 
 from skillspector.models import Finding
+from skillspector.refextract import ExtractedReferences
 
 
 class SkillspectorState(TypedDict, total=False):
@@ -42,6 +43,9 @@ class SkillspectorState(TypedDict, total=False):
     ast_cache: dict[str, str]
     manifest: dict[str, object]
     previous_manifest: dict[str, object] | None
+
+    # refExtract node: the single typed reference feed consumed by Enrichment
+    references: ExtractedReferences
 
     # Accumulated findings (reducer: analyzer nodes append to this list)
     findings: Annotated[list[Finding], operator.add]

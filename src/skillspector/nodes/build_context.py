@@ -37,6 +37,11 @@ _SKIP_DIRS = frozenset(
     {".git", "__pycache__", "node_modules", ".venv", "venv", ".tox", ".pytest_cache"}
 )
 
+# Hidden files that ARE security-relevant and must not be dropped by the
+# dotfile filter: external-server config and supply-chain config (submodule repos,
+# custom package registries, environment endpoints).
+_KEEP_DOTFILES = frozenset({".mcp.json", ".gitmodules", ".npmrc", ".env"})
+
 # File type by extension
 _FILE_TYPES: dict[str, str] = {
     ".md": "markdown",
@@ -75,7 +80,9 @@ def _resolve_skill_dir(state: SkillspectorState) -> Path | None:
 def _walk_skill_files(skill_dir: Path) -> list[str]:
     """Walk skill directory and return sorted relative path strings.
 
-    Skips _SKIP_DIRS and hidden files except those starting with .claude.
+    Skips _SKIP_DIRS and hidden files, except those starting with .claude and the
+    security-relevant config dotfiles in _KEEP_DOTFILES (external-server and
+    supply-chain config), which we must scan.
     """
     paths: list[str] = []
     for item in skill_dir.rglob("*"):
@@ -83,7 +90,11 @@ def _walk_skill_files(skill_dir: Path) -> list[str]:
             continue
         if any(skip in item.parts for skip in _SKIP_DIRS):
             continue
-        if item.name.startswith(".") and not item.name.startswith(".claude"):
+        if (
+            item.name.startswith(".")
+            and not item.name.startswith(".claude")
+            and item.name not in _KEEP_DOTFILES
+        ):
             continue
         try:
             rel = item.relative_to(skill_dir)
