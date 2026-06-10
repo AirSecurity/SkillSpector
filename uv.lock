@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 
 [[package]]
@@ -2094,6 +2094,11 @@ wheels = [
 ]
 
 [[package]]
+name = "skillex"
+version = "0.1.0"
+source = { git = "https://github.com/AirSecurity/skillex?rev=v0.1.0#af82131c9ab9f9603dd73354517390975d6004a3" }
+
+[[package]]
 name = "skillspector"
 version = "2.1.1"
 source = { editable = "." }
@@ -2108,6 +2113,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "rich" },
+    { name = "skillex" },
     { name = "typer" },
     { name = "yara-python" },
 ]
@@ -2143,6 +2149,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "rich", specifier = ">=14.3.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.0" },
+    { name = "skillex", git = "https://github.com/AirSecurity/skillex?rev=v0.1.0" },
     { name = "twine", marker = "extra == 'dev'", specifier = ">=6.2.0" },
     { name = "typer", specifier = ">=0.23.0,<0.24" },
     { name = "yara-python", specifier = ">=4.5.0" },

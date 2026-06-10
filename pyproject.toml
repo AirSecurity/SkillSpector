@@ -42,6 +42,8 @@ dependencies = [
     "langchain-openai>=1.1.10",
     "langsmith>=0.7.30",
     "yara-python>=4.5.0",
+    # reference extraction lives in its own repo now (extracted from this tree at 7e648b3)
+    "skillex @ git+https://github.com/AirSecurity/skillex@v0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -63,6 +65,10 @@ skillspector = "skillspector.cli:app"
 Homepage = "https://github.com/NVIDIA/skillspector"
 Documentation = "https://github.com/NVIDIA/skillspector#readme"
 Issues = "https://github.com/NVIDIA/skillspector/issues"
+
+[tool.hatch.metadata]
+# skillex is consumed as a git dependency (no PyPI release yet)
+allow-direct-references = true
 
 [tool.hatch.build]
 exclude = [".claude/", ".cursor/", ".agents/"]

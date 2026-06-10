@@ -23,7 +23,7 @@ from typing import Annotated
 from typing_extensions import TypedDict
 
 from skillspector.models import Finding
-from skillspector.refextract import ExtractedReferences
+from skillex.refextract import ExtractedReferences
 
 
 class SkillspectorState(TypedDict, total=False):

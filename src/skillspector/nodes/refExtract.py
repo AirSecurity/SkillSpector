@@ -5,12 +5,12 @@
 
 First of two sequential pre-analysis nodes (build_context -> refExtract ->
 Enrichment -> analyzers). A thin orchestrator: it hands build_context's
-file_cache to the standalone skillspector.refextract package and stores the
-resulting feed (state["references"]) for the Enrichment node to consume.
+file_cache to the standalone skillex library (https://github.com/AirSecurity/skillex)
+and stores the resulting feed (state["references"]) for the Enrichment node to consume.
 
-All extraction logic lives in skillspector.refextract (one module + product
-object per reference kind), kept dependency-free so it can be reused outside
-this graph.
+All extraction logic lives in skillex.refextract (one module + product object
+per reference kind, stdlib-only) — extracted from this tree at 7e648b3; its
+review guide, regression suite, and feature backlog live in that repo.
 
 Not yet covered: instruction-file references (links a skill makes to other local
 instruction/skill files).
@@ -19,7 +19,7 @@ instruction/skill files).
 from __future__ import annotations
 
 from skillspector.logging_config import get_logger
-from skillspector.refextract import extract_references
+from skillex.refextract import extract_references
 from skillspector.state import SkillspectorState
 
 logger = get_logger(__name__)
