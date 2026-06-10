@@ -34,8 +34,9 @@ def refExtract(state: SkillspectorState) -> dict[str, object]:
     file_cache: dict[str, str] = state.get("file_cache") or {}
     references = extract_references(file_cache)
     logger.info(
-        "refExtract: %d references across %d files (%s)",
-        references.total(),
+        "refExtract: %d unique products / %d reference sites across %d files (%s)",
+        references.total_unique(),
+        references.total_occurrences(),
         len(file_cache),
         ", ".join(f"{kind}={count}" for kind, count in references.counts().items()),
     )

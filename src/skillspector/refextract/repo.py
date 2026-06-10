@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import NamedTuple
 from urllib.parse import urlparse
 
 from skillspector.refextract.mcp import Mcp
@@ -66,8 +67,16 @@ class Repo:
         }
 
 
-def _forge_repo(url: str) -> tuple[str, str, str] | None:
-    """Return (canonical_host, owner, repo) for a forge URL, else None."""
+class _ForgeRepo(NamedTuple):
+    """A forge URL resolved to its canonical coordinates (pre-dedup)."""
+
+    host: str
+    owner: str
+    repo: str
+
+
+def _forge_repo(url: str) -> _ForgeRepo | None:
+    """Resolve a forge URL to its canonical (host, owner, repo), else None."""
     try:
         parsed = urlparse(url)
     except ValueError:
@@ -85,8 +94,8 @@ def _forge_repo(url: str) -> tuple[str, str, str] | None:
             segments = segments[: segments.index("-")]
         if len(segments) < 2:
             return None
-        return host, segments[0], "/".join(segments[1:]).removesuffix(".git")
-    return host, segments[0], segments[1].removesuffix(".git")
+        return _ForgeRepo(host, segments[0], "/".join(segments[1:]).removesuffix(".git"))
+    return _ForgeRepo(host, segments[0], segments[1].removesuffix(".git"))
 
 
 def derive_repos(urls: Iterable[Url], mcps: Iterable[Mcp] = ()) -> list[Repo]:
@@ -94,7 +103,7 @@ def derive_repos(urls: Iterable[Url], mcps: Iterable[Mcp] = ()) -> list[Repo]:
 
     One Repo per distinct (host, owner, repo); every reference site is an Occurrence.
     """
-    entries: dict[tuple[str, str, str], list[Occurrence]] = {}
+    entries: dict[_ForgeRepo, list[Occurrence]] = {}
     for source_url, context in url_sources(urls, mcps):
         forge_repo = _forge_repo(source_url)
         if forge_repo is None:
@@ -103,6 +112,6 @@ def derive_repos(urls: Iterable[Url], mcps: Iterable[Mcp] = ()) -> list[Repo]:
             Occurrence(context=context, source_url=source_url)
         )
     return [
-        Repo(host=host, owner=owner, repo=repo, occurrences=tuple(occurrences))
-        for (host, owner, repo), occurrences in entries.items()
+        Repo(host=forge.host, owner=forge.owner, repo=forge.repo, occurrences=tuple(occurrences))
+        for forge, occurrences in entries.items()
     ]

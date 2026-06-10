@@ -21,10 +21,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
+from typing import NamedTuple
 
 from skillspector.refextract.context import Context, RefForm, context_for
+from skillspector.refextract.occurrence import Occurrence
+from skillspector.refextract.package import launcher_package
 from skillspector.refextract.paths import suffix
 
 
@@ -35,98 +38,73 @@ class Transport(StrEnum):
     SSE = "sse"  # remote server-sent-events endpoint
     HTTP = "http"  # remote (streamable) HTTP endpoint
 
-# Launcher command -> package manager whose package it runs.
-_RUNNER_TO_MANAGER = {
-    "npx": "npm", "bunx": "npm", "pnpm": "npm", "yarn": "npm", "dlx": "npm",
-    "uvx": "pip", "uv": "pip", "pipx": "pip", "pip": "pip", "pip3": "pip",
-}
-# Sub-tokens to skip when finding the package argument after a launcher.
-_RUNNER_SKIP_ARGS = {
-    "-y", "--yes", "-q", "--quiet", "run", "tool", "exec", "dlx",
-    "install", "add", "-p", "--package",
-}
-# docker run flags that consume the FOLLOWING token as their value — so that
-# value isn't mistaken for the image (e.g. `-e API_KEY img`, `-v /a:/b img`).
-_DOCKER_VALUE_FLAGS = {
-    "-e", "--env", "-v", "--volume", "--mount", "-p", "--publish", "-w", "--workdir",
-    "--name", "--network", "--net", "-u", "--user", "--entrypoint", "--platform",
-    "-l", "--label", "--add-host", "--device", "--cap-add", "--cap-drop",
-}
-
 
 @dataclass(frozen=True)
 class Mcp:
-    """An MCP server a skill declares."""
+    """An MCP server declaration, deduped by full identity (not name alone).
+
+    Two declarations sharing a name but differing in command/args/url are
+    *different products* — a name collision with a different payload is exactly
+    the anomaly that must stay visible. Identical declarations found in several
+    files merge into one Mcp whose ``occurrences`` lists every declaration site.
+    """
 
     name: str
-    context: Context
     command: str | None = None  # stdio launcher: npx / uvx / docker / node / python / ...
     args: tuple[str, ...] = ()
     transport: Transport = Transport.STDIO
     url: str | None = None  # remote (sse/http) servers
     env_vars: tuple[str, ...] = ()  # env NAMES only
-    # Cross-link by value (not an object ref): matches Package.slug ("manager:name")
-    # so a consumer can join an MCP launcher to the package it runs.
+    # Cross-link by value (not an object ref): matches Package.slug ("manager:name",
+    # same normalization — see package.launcher_package) so a consumer can join an
+    # MCP launcher to the package it runs. The matching Package product only exists
+    # when the skill also references the package elsewhere; treat as a dangling FK.
     package: str | None = None
+    occurrences: tuple[Occurrence, ...] = ()
+
+    @property
+    def context(self) -> Context:
+        """First declaration site — keeps Mcp a UrlBearing for sources.url_sources."""
+        return self.occurrences[0].context
+
+    @property
+    def identity(self) -> tuple[str, str | None, tuple[str, ...], Transport, str | None, tuple[str, ...]]:
+        """Everything that makes two declarations the same server (all fields but
+        the declaration sites)."""
+        return (self.name, self.command, self.args, self.transport, self.url, self.env_vars)
 
     def to_dict(self) -> dict[str, object]:
         return {
             "name": self.name,
-            "context": self.context.to_dict(),
             "command": self.command,
             "args": list(self.args),
             "transport": str(self.transport),
             "url": self.url,
             "env_vars": list(self.env_vars),
             "package": self.package,
+            "occurrences": [occurrence.to_dict() for occurrence in self.occurrences],
         }
 
 
-def _command_basename(command: str) -> str:
-    """Bare executable name (strip any directory + .exe)."""
-    return command.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].removesuffix(".exe").lower()
+class _Endpoint(NamedTuple):
+    """A server entry's transport and remote URL (url None for stdio)."""
+
+    transport: Transport
+    url: str | None
 
 
-def _package_cross_link(command: str | None, args: tuple[str, ...]) -> str | None:
-    """Derive a "manager:name" package from a launcher command + its args."""
-    if not command:
-        return None
-    cmd = _command_basename(command)
-    if cmd == "docker":
-        skip_value = False
-        for arg in args:
-            if skip_value:  # this token is a flag's value, not the image
-                skip_value = False
-                continue
-            if arg in ("run", "pull"):
-                continue
-            if arg.startswith("-"):
-                skip_value = arg in _DOCKER_VALUE_FLAGS
-                continue
-            return f"docker:{arg}"
-        return None
-    manager = _RUNNER_TO_MANAGER.get(cmd)
-    if not manager:
-        return None  # node/python/bash/... launch a local script, not a package
-    for arg in args:
-        if arg.lower() in _RUNNER_SKIP_ARGS or arg.startswith("-"):
-            continue
-        return f"{manager}:{arg}"
-    return None
-
-
-def _transport_of(entry: dict) -> tuple[Transport, str | None]:
-    """Return (transport, url) for a server entry."""
+def _transport_of(entry: dict) -> _Endpoint:
+    """Resolve a server entry's transport (and remote URL, when it has one)."""
     url = entry.get("url")
     if not url:
-        return (Transport.STDIO, None)
+        return _Endpoint(Transport.STDIO, None)
     declared = (entry.get("type") or entry.get("transport") or "").lower()
     if declared == "sse":
-        return (Transport.SSE, url)
+        return _Endpoint(Transport.SSE, url)
     if "http" in declared:  # http / streamable-http
-        return (Transport.HTTP, url)
+        return _Endpoint(Transport.HTTP, url)
     # Undeclared remote: infer from the URL shape.
-    return (Transport.SSE if str(url).rstrip("/").endswith("sse") else Transport.HTTP, url)
+    return _Endpoint(Transport.SSE if str(url).rstrip("/").endswith("sse") else Transport.HTTP, url)
 
 
 def _find_line(lines: list[str], name: str) -> int | None:
@@ -160,32 +138,36 @@ def _iter_mcps(path: str, text: str) -> Iterator[Mcp]:
         env = entry.get("env") or {}
         env_vars = tuple(env.keys()) if isinstance(env, dict) else ()
         transport, url = _transport_of(entry)
+        context = context_for(path, _find_line(lines, str(name)), RefForm.MCP_CONFIG)
         yield Mcp(
             name=str(name),
-            context=context_for(path, _find_line(lines, str(name)), RefForm.MCP_CONFIG),
             command=str(command) if command else None,
             args=args,
             transport=transport,
             url=str(url) if url else None,
             env_vars=env_vars,
-            package=_package_cross_link(str(command) if command else None, args),
+            package=launcher_package(str(command) if command else None, args),
+            occurrences=(Occurrence(context=context),),
         )
 
 
 def extract_mcps(files: Mapping[str, str]) -> list[Mcp]:
     """Extract MCP server references from a {relative-path: content} map.
 
-    Scans JSON files for an ``mcpServers`` object. Deduped by server name; the
-    first occurrence wins.
+    Scans JSON files (or any file mentioning ``mcpServers``) for server objects.
+    Deduped by full identity: identical declarations merge (occurrences keeps
+    every site); same-name declarations with different payloads stay separate.
     """
-    mcps: list[Mcp] = []
-    seen: set[str] = set()
+    merged: dict[tuple, Mcp] = {}
     for path, content in files.items():
         if suffix(path) != ".json" and "mcpServers" not in content:
             continue
         for mcp in _iter_mcps(path, content):
-            if mcp.name in seen:
-                continue
-            seen.add(mcp.name)
-            mcps.append(mcp)
-    return mcps
+            existing = merged.get(mcp.identity)
+            if existing is None:
+                merged[mcp.identity] = mcp
+            else:
+                merged[mcp.identity] = replace(
+                    existing, occurrences=existing.occurrences + mcp.occurrences
+                )
+    return list(merged.values())

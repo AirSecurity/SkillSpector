@@ -30,15 +30,9 @@ class ExtractedReferences:
     mcps: tuple[Mcp, ...] = ()
     fetch_executes: tuple[FetchExecute, ...] = ()
 
-    def total(self) -> int:
-        """Total number of references across all product kinds."""
-        return (
-            len(self.urls) + len(self.repos) + len(self.packages)
-            + len(self.domains) + len(self.mcps) + len(self.fetch_executes)
-        )
-
     def counts(self) -> dict[str, int]:
-        """Per-kind reference counts."""
+        """Unique products per kind — deduped kinds (repo/package/domain/mcp) count
+        distinct resources, occurrence-level kinds (url/fetch_execute) count sites."""
         return {
             "url": len(self.urls),
             "repo": len(self.repos),
@@ -47,6 +41,52 @@ class ExtractedReferences:
             "mcp": len(self.mcps),
             "fetch_execute": len(self.fetch_executes),
         }
+
+    def occurrence_counts(self) -> dict[str, int]:
+        """Reference *sites* per kind — every occurrence of the deduped kinds;
+        url/fetch_execute are already one product per site."""
+        return {
+            "url": len(self.urls),
+            "repo": sum(len(repo.occurrences) for repo in self.repos),
+            "package": sum(len(package.occurrences) for package in self.packages),
+            "domain": sum(len(domain.occurrences) for domain in self.domains),
+            "mcp": sum(len(mcp.occurrences) for mcp in self.mcps),
+            "fetch_execute": len(self.fetch_executes),
+        }
+
+    def total_unique(self) -> int:
+        """Distinct products across all kinds (a repo cited 50 times counts once)."""
+        return sum(self.counts().values())
+
+    def total_occurrences(self) -> int:
+        """Reference sites across all kinds (a repo cited 50 times counts 50).
+
+        Kinds overlap: repos/domains derive from urls, fetch_executes and MCP
+        endpoints share lines with their urls — so one physical site can count
+        several times here. Use external_site_count() for the deduped answer.
+        """
+        return sum(self.occurrence_counts().values())
+
+    def external_site_count(self) -> int:
+        """Number of distinct places — (file, line) — referencing something external.
+
+        Every kind's occurrences collapse onto their site, so a github URL that is
+        also a Repo and a Domain counts once. A whole-file manifest parse
+        (line None) is one place.
+        """
+        sites: set[tuple[str, int | None]] = {
+            (url.context.file, url.context.line) for url in self.urls
+        }
+        sites.update(
+            (fetch_execute.context.file, fetch_execute.context.line)
+            for fetch_execute in self.fetch_executes
+        )
+        for product in (*self.repos, *self.packages, *self.domains, *self.mcps):
+            sites.update(
+                (occurrence.context.file, occurrence.context.line)
+                for occurrence in product.occurrences
+            )
+        return len(sites)
 
     def to_dict(self) -> dict[str, object]:
         return {

@@ -19,11 +19,13 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import NamedTuple
 from urllib.parse import urlparse
 
 from skillspector.refextract.context import Context, RefForm, context_for
 from skillspector.refextract.markdown import fence_map, markdown_form
 from skillspector.refextract.paths import is_markdown
+from skillspector.refextract.url import first_url_on_line
 
 
 class ExecPattern(StrEnum):
@@ -59,7 +61,7 @@ class FetchExecute:
 # First matching pattern on a line wins (ordered most- to least-specific-ish).
 _PATTERNS = [
     (ExecPattern.CURL_PIPE_SHELL,
-     re.compile(r"(curl|wget)\s+[^\n|;`]{0,300}?\|\s*(bash|sh|zsh|fish)\b", re.I)),
+     re.compile(r"(curl|wget)\s+[^\n|;`]{0,300}?\|\s*(?:sudo\s+(?:-\S+\s+)*)?(bash|sh|zsh|fish)\b", re.I)),
     (ExecPattern.EVAL_CURL,
      re.compile(r"\beval\s+[\"']?\$\(\s*(curl|wget)\b", re.I)),
     (ExecPattern.SHELL_PROCESS_SUB,
@@ -67,27 +69,34 @@ _PATTERNS = [
     (ExecPattern.PYTHON_C_CURL,
      re.compile(r"\bpython3?\s+-c\s+[\"']?\$\(\s*(curl|wget)\b", re.I)),
     (ExecPattern.CURL_THEN_CHMOD,
-     re.compile(r"\bcurl\s+(-O|-o\s+\S+)[^;\n]{0,200}?;.{0,200}?chmod\s+\+x", re.I)),
+     re.compile(r"\bcurl\s+(-O|-o\s+\S+)[^;&\n]{0,200}?(?:;|&&).{0,200}?chmod\s+\+x", re.I)),
     (ExecPattern.SOURCE_CURL,
      re.compile(r"\bsource\s+<\(\s*(curl|wget)\b", re.I)),
     (ExecPattern.POWERSHELL_IEX,
-     re.compile(r"\biex\s+\(\s*iwr\b|\binvoke-expression\s+\(\s*invoke-webrequest\b", re.I)),
+     re.compile(
+         r"\biex\s+\(\s*i(?:wr|rm)\b"
+         r"|\binvoke-expression\s+\(\s*invoke-(?:webrequest|restmethod)\b",
+         re.I,
+     )),
 ]
 
-_URL_RE = re.compile(r"https?://[^\s\"'`)>\]}]+")
+class _LineUrl(NamedTuple):
+    """The fetched URL found on a matched line, with its host (either may be None)."""
+
+    url: str | None
+    host: str | None
 
 
-def _line_url(line: str) -> tuple[str | None, str | None]:
-    """The first URL on the line and its host, or (None, None)."""
-    match = _URL_RE.search(line)
-    if not match:
-        return None, None
-    url = match.group(0).rstrip(".,;:!?)")
+def _line_url(line: str) -> _LineUrl:
+    """The first URL on the line (via the shared url.py recognizer) and its host."""
+    url = first_url_on_line(line)
+    if url is None:
+        return _LineUrl(None, None)
     try:
         host = (urlparse(url).hostname or "").lower() or None
     except ValueError:
         host = None
-    return url, host
+    return _LineUrl(url, host)
 
 
 def extract_fetch_executes(files: Mapping[str, str]) -> list[FetchExecute]:

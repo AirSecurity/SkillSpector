@@ -22,6 +22,14 @@ class Occurrence:
 
     context: Context
     source_url: str | None = None  # URL that yielded a derived ref (domain/repo); None for packages
+    # Version/constraint exactly as written at this site (packages: ==2.31.0, ^18.2,
+    # 1.25-alpine, sha256:…). Verbatim on purpose — a constraint is information; the
+    # *canonical* name lives on the product, the *pin* lives where it was written.
+    version: str | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {"context": self.context.to_dict(), "source_url": self.source_url}
+        return {
+            "context": self.context.to_dict(),
+            "source_url": self.source_url,
+            "version": self.version,
+        }

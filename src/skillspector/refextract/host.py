@@ -11,6 +11,7 @@ validated across the full skills.sh corpus:
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from enum import StrEnum
 
@@ -93,29 +94,45 @@ _TAKEOVER_RX = [(re.compile(pattern), platform) for pattern, platform in _TAKEOV
 
 
 def is_internal_host(host: str) -> bool:
-    """True for loopback / RFC-1918 / .local hosts that aren't externally meaningful."""
+    """True for hosts that aren't externally meaningful: private / loopback /
+    link-local / unspecified IPs, and localhost / .local names.
+
+    IP-ness is decided by *parsing* (ipaddress), never by string prefix — a DNS
+    name whose first label happens to be numeric (10.media.example.com) is a real
+    external host, and prefix matching once silently suppressed its Domain.
+    """
+    if not host:
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:  # not an IP literal — a DNS name
+        return host == "localhost" or host.endswith(".local")
     return (
-        not host
-        or host in ("localhost", "127.0.0.1")
-        or host.startswith("192.168.")
-        or host.startswith("10.")
-        or host.endswith(".local")
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_unspecified
     )
 
 
 def apex_domain(host: str) -> str:
-    """Return the eTLD+1 apex for a host, honoring known multi-part suffixes."""
+    """Return the eTLD+1 apex for a host, honoring known multi-part suffixes.
+
+    Longest suffix wins, and 4-label suffixes (blob.core.windows.net) are checked
+    too — checking only tail2/tail3 made those entries dead and collapsed every
+    Azure-blob account into one `windows.net` apex.
+    """
     host = host.lower().strip(".")
     if not host or host.count(".") < 1:
         return ""
     parts = host.split(".")
-    tail3 = ".".join(parts[-3:]) if len(parts) >= 3 else ""
-    tail2 = ".".join(parts[-2:])
-    if tail3 in _MULTI_PART_SUFFIXES:
-        return ".".join(parts[-4:]) if len(parts) >= 4 else tail3
-    if tail2 in _MULTI_PART_SUFFIXES:
-        return ".".join(parts[-3:]) if len(parts) >= 3 else tail2
-    return tail2
+    for suffix_length in (4, 3, 2):
+        if len(parts) < suffix_length:
+            continue
+        tail = ".".join(parts[-suffix_length:])
+        if tail in _MULTI_PART_SUFFIXES:
+            return ".".join(parts[-(suffix_length + 1):]) if len(parts) > suffix_length else tail
+    return ".".join(parts[-2:])
 
 
 def takeover_platform(host: str) -> TakeoverPlatform:
@@ -153,7 +170,9 @@ def service_family(host: str) -> ServiceFamily:
         return ServiceFamily.NONE
     if (
         host == "github.com" or host.endswith(".github.com")
-        or "githubusercontent" in host or host.endswith(".github.io")
+        # anchored — `"githubusercontent" in host` let evilgithubusercontent.com spoof CODE_HOST
+        or host == "githubusercontent.com" or host.endswith(".githubusercontent.com")
+        or host.endswith(".github.io")
         or host == "gitlab.com" or host.endswith(".gitlab.com") or host.endswith(".gitlab.io")
         or host == "bitbucket.org" or host == "codeberg.org" or host.endswith(".sr.ht")
     ):
@@ -170,11 +189,14 @@ def service_family(host: str) -> ServiceFamily:
     ):
         return ServiceFamily.PACKAGE_REGISTRY
     if (
-        host == "s3.amazonaws.com" or host.endswith(".s3.amazonaws.com") or ".s3." in host
+        host == "s3.amazonaws.com" or host.endswith(".s3.amazonaws.com")
+        # regional S3 (bucket.s3.us-east-1.amazonaws.com) — anchored on the AWS
+        # suffix; a bare `".s3." in host` let foo.s3.evil.com spoof OBJECT_STORE
+        or (host.endswith(".amazonaws.com") and (".s3." in host or host.startswith("s3.")))
         or host.endswith(".blob.core.windows.net")
         or host == "storage.googleapis.com" or host.endswith(".storage.googleapis.com")
         or host.endswith(".r2.dev") or host.endswith(".r2.cloudflarestorage.com")
-        or ".digitaloceanspaces.com" in host
+        or host == "digitaloceanspaces.com" or host.endswith(".digitaloceanspaces.com")
     ):
         return ServiceFamily.OBJECT_STORE
     if (
